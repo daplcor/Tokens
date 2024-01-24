@@ -1,0 +1,460 @@
+(load "./kda-env/init.repl")
+(load "./loaddex.repl")
+(begin-tx "Load heron token environment")
+
+(env-keys ["gov" "ops"])
+(env-data
+  {
+    "n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron-token-gov": {
+      "keys": ["gov"], "pred": "keys-all"
+    },
+    "init-data": { 
+      "initial-supply": 10000.0,
+      "accounts": [
+        { 
+          "account": "ROOT", 
+          "guard": {
+            "keys": ["gov"], "pred": "keys-all"
+          },
+          "percent": 0.8
+        },
+        { 
+          "account": "LIQUIDITY", 
+          "guard": {
+            "keys": ["gov"], "pred": "keys-all"
+          },
+          "percent": 0.2
+        }
+      ]
+    },
+    "bank-guard": {
+      "keys": [
+        "gov"
+      ],
+      "pred": "keys-all"
+    },
+    "exempt-accounts": ["bob", "jrCjRXWOY0hNebuHUx1_uWTrRd2f4_Xm67V5LFk-ZEU"],
+    "upgrade": false
+  }  
+)
+(load "token.pact")
+(commit-tx)
+
+
+
+(begin-tx "Test governance")
+(use n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)
+
+(env-keys [])
+(expect-failure "Can't acquire GOV cap without gov key"
+  "Tx Failed: Keyset failure (keys-all): 'n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron-token-gov"
+  (test-capability (GOV))
+)
+
+(env-keys ["test"])
+(expect-failure "Can't acquire GOV cap without gov key"
+  "Tx Failed: Keyset failure (keys-all): 'n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron-token-gov"
+  (test-capability (GOV))
+)
+
+(env-keys ["gov"])
+(expect-that "Can acquire GOV cap with gov key"
+  (= "Capability acquired")
+  (test-capability (GOV))
+)
+
+(commit-tx)
+
+
+
+(begin-tx "Test init and tokenomics")
+(use n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)
+
+(expect-that "ROOT has initial funds"
+  (= 8000.0)
+  (get-balance "ROOT")
+)
+(expect-that "LIQUIDITY has initial funds"
+  (= 2000.0)
+  (get-balance "LIQUIDITY")
+)
+
+(commit-tx)
+
+(begin-tx "Transfer Test")
+(env-keys ["gov"])
+;  (env-sigs
+;  [{
+;    "key": "bob-key",
+;    "caps": [
+;        (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.TRANSFER "bob" "carol" 10.0)
+;    ]
+;  }])
+(env-sigs [{
+    "key": "gov",
+    "caps": [(n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.GOV)]
+}])
+(env-data {
+    "n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron-token-gov": {
+        "keys": ["gov"], "pred": "keys-all"
+      },
+    "ks": {
+        "keys": ["bob-key"],
+        "pred": "keys-all"
+    },
+    "alice": {
+        "keys": ["alice"],
+        "pred": "keys-all"
+    },
+    "FEES_ACCOUNT": {
+        "keys": ["fees-key"],
+        "pred": "keys-all"
+    },
+    "BURN_ACCOUNT": {
+        "keys": ["burn-key"],
+        "pred": "keys-all"
+    }
+})
+(use n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)
+
+(create-account "FEES_ACCOUNT" (read-keyset 'FEES_ACCOUNT))
+(create-account "BURN_ACCOUNT" (read-keyset 'BURN_ACCOUNT))
+(create-account "alice" (read-keyset 'alice))
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+(move-premine "bob" (read-keyset 'ks) 2000.0)
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+
+(commit-tx)
+
+(begin-tx "transfer test to carol")
+(env-keys ["gov"])
+(env-sigs
+[{
+  "key": "bob-key",
+  "caps": [
+      (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.TRANSFER "bob" "carol" 10.0)
+  ]
+}])
+(env-data {
+    "ks": {
+        "keys": ["carol-key"],
+        "pred": "keys-all"
+    }
+})
+(use n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)
+
+(transfer-create "bob" "carol" (read-keyset 'ks) 10.0 )
+(print (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.details "FEES_ACCOUNT"))
+(commit-tx)
+
+(begin-tx "Create Dex pair")
+(use kaddex.exchange)
+
+(env-sigs [])
+
+;; test pair canonicity
+(use kaddex.exchange)
+(expect "canonical pair keys match"
+  (get-pair-key n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)
+  (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron))
+(expect "pair does not exist yet" false
+  (pair-exists n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin))
+
+;; test governance on create-pair
+(expect
+  "create pair succeeds without governance"
+  {"key": (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron), "account": (create-pair-account (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron) "")}
+  (create-pair coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron "")
+)
+
+(env-keys ["kaddex-admin"])
+
+(env-data
+  { 'bob: ["bob"]
+  , 'alice: ["alice"]
+  })
+
+(test-capability (coin.COINBASE))
+;  (coin.coinbase "Bob" (read-keyset 'bob) 1000.0)
+;  (kaddex.abc.create-account "Bob" (read-keyset 'bob))
+;  (kaddex.abc.fund "Bob" 2000.0)
+;  (kaddex.xyz.create-account "Bob" (read-keyset 'bob))
+;  (kaddex.xyz.fund "Bob" 600.0)
+;  (coin.coinbase "Alice" (read-keyset 'alice) 10000.0)
+;  (kaddex.abc.create-account "Alice" (read-keyset 'alice))
+;  (kaddex.abc.fund "Alice" 20000.0)
+(commit-tx)
+
+;;
+;; add-liquidity
+;;
+(begin-tx)
+(use kaddex.exchange)
+
+(env-sigs [
+  { 'key: "bob-key"
+  , 'caps:
+    [(coin.TRANSFER "bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) 10.0)
+     (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.TRANSFER "bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) 40.0)
+    ]
+  }])
+
+(expect "add-liquidity"
+  { "liquidity": 19.9
+  , "supply": 20.0
+  , "amount0": 10.0
+  , "amount1": 40.0 }
+  (add-liquidity
+    coin
+    n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron
+    10.0
+    40.0
+    10.0
+    40.0
+    "bob"
+    "bob"
+    (read-keyset 'bob)
+    ))
+
+(expect "add-liquidity events"
+  [ { "name": "coin.TRANSFER"
+    , "params": ["bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) 10.0]
+    , "module-hash": (at 'hash (describe-module "coin"))
+    }
+    { "name": "n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.TRANSFER"
+    , "params": ["bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) 40.0]
+    , "module-hash": (at 'hash (describe-module "n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron"))
+    }
+    { "name": "kaddex.tokens.MINT"
+    , "params": [ (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)
+                  (kaddex.exchange.get-lock-account-principal (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)) 0.1]
+    , "module-hash": (at 'hash (describe-module "kaddex.tokens"))
+    }
+    { "name": "kaddex.tokens.MINT"
+    , "params": [(get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron) "bob" 19.9]
+    , "module-hash": (at 'hash (describe-module "kaddex.tokens"))
+    }
+    { "name": "kaddex.exchange.UPDATE"
+    , "params": [(get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron) 10.0 40.0]
+    , "module-hash": (at 'hash (describe-module "kaddex.exchange"))
+    }
+  ]
+  (env-events true))
+
+(expect "token liquidity for bob"
+  19.9
+  (kaddex.tokens.get-balance (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron) "bob")
+)
+(expect "minimum liquidity locked"
+  MINIMUM_LIQUIDITY
+  (kaddex.tokens.get-balance (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron) (kaddex.exchange.get-lock-account-principal (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)))
+)
+(expect "total supply for pair token"
+  20.0
+  (kaddex.tokens.total-supply (get-pair-key coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron))
+)
+(expect "kda debited for bob"
+  990.0 (coin.get-balance "bob"))
+(expect "abc debited for bob"
+  1750.0 (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "bob"))
+(expect "kda credited for pair"
+  10.0 (coin.get-balance (at 'account (get-pair coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron))))
+(expect "abc credited for pair"
+  40.0 (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance (at 'account (get-pair coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron))))
+
+(rollback-tx)
+
+
+(begin-tx)
+(use kaddex.exchange)
+
+(env-enable-repl-natives true)
+
+(module fixture G
+  (defcap G () true)
+  (defun setup-abc (amount0:decimal amount1:decimal)
+    (env-sigs
+      [ { 'key: "bob-key"
+        , 'caps:
+          [ (coin.TRANSFER "bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) amount0)
+            (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.TRANSFER "bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) amount1)
+          ]}])
+    (with-applied-env
+      (add-liquidity coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron
+        amount0 amount1 amount0 amount1
+        "bob" "bob" (read-keyset "bob")
+        ))
+    (env-events true)
+  )
+        
+  (defun setup-xyz (amount0:decimal amount1:decimal)
+    (env-sigs
+      [ { 'key: "bob-key"
+        , 'caps:
+          [ (coin.TRANSFER "bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) 10.0)
+            (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.TRANSFER "bob" (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin)) 40.0)
+          ]}])
+    (with-applied-env
+      (add-liquidity coin n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron
+        amount0 amount1 amount0 amount1
+        "bob" "bob" (read-keyset "bob")
+        ))
+    (env-events true)
+  )
+
+)
+(commit-tx)
+
+;;
+;; single-leg swap tests
+;;
+
+(begin-tx)
+(use kaddex.exchange)
+(module swaps G
+  (defcap G () true)
+
+  (defun swap-test-case
+    ( swapAmount:decimal
+      token0Amount:decimal
+      token1Amount:decimal
+      expectedOutputAmount:decimal
+    )
+    (fixture.setup-abc token0Amount token1Amount)
+    (env-sigs [
+      { 'key: "alice"
+      , 'caps:
+        [ (coin.TRANSFER "alice"
+          (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin))
+          swapAmount)
+        ]}])
+        (env-data {
+            "alice": {
+                "keys": [
+                  "alice"
+                ],
+                "pred": "keys-all"
+              }
+        })
+    (with-applied-env
+      (coin.transfer "alice"
+        (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin))
+        swapAmount))
+    (swap kaddex.noop-callable
+      "alice"
+      (read-keyset "alice")
+      n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron
+      expectedOutputAmount
+      coin)
+  )
+
+  (defun optimistic-test-case
+    ( outputAmount:decimal
+      token0Amount:decimal
+      token1Amount:decimal
+      inputAmount:decimal
+    )
+    (fixture.setup-abc token0Amount token1Amount)
+    (env-sigs [
+      { 'key: "alice"
+      , 'caps:
+        [ (coin.TRANSFER "alice"
+          (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin))
+          inputAmount)
+        ]}])
+    (env-data {
+        "alice": {
+            "keys": [
+              "alice"
+            ],
+            "pred": "keys-all"
+          }
+    })
+    (with-applied-env
+      (coin.transfer "alice"
+        (at 'account (get-pair n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron coin))
+        inputAmount))
+    (swap kaddex.noop-callable
+      "alice"
+      (read-keyset "alice")
+      coin
+      outputAmount
+      n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron)
+  )
+)
+
+(commit-tx)
+
+(begin-tx)
+(swaps.swap-test-case 1.0 5.0 10.0 1.6624979156)
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+
+(begin-tx)
+(expect-failure "swap test 1" "K"
+ (swaps.swap-test-case 1.0 5.0 10.0 1.6624979156))
+
+(begin-tx)
+(swaps.swap-test-case 1.0 10.0 5.0 0.45330544694007)
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+
+(begin-tx)
+(expect-failure "swap test 2" "K"
+ (swaps.swap-test-case 1.0 10.0 5.0 0.45330544694008))
+
+(begin-tx)
+(swaps.swap-test-case 2.0 5.0 10.0 2.85101515584786)
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+(begin-tx)
+(expect-failure "swap test 3" "K"
+ (swaps.swap-test-case 2.0 5.0 10.0 2.85101515584787))
+
+(begin-tx)
+(swaps.swap-test-case 2.0 10.0 5.0 0.831248957812)
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+(begin-tx)
+(expect-failure "swap test 4" "K"
+ (swaps.swap-test-case 2.0 10.0 5.0 0.831248957813))
+
+(begin-tx)
+(swaps.swap-test-case 1.0 10.0 10.0 0.906610893880)
+(print  (n_e309f0fa7cf3a13f93a8da5325cdad32790d2070.heron.get-balance "FEES_ACCOUNT"))
+(begin-tx)
+(expect-failure "swap test 5" "K"
+ (swaps.swap-test-case 1.0 10.0 10.0 0.906610893881))
+
+(begin-tx)
+(swaps.swap-test-case 1.0 100.0 100.0 0.987158034397)
+(begin-tx)
+(expect-failure "swap test 6" "K"
+ (swaps.swap-test-case 1.0 100.0 100.0 0.987158034398))
+
+(begin-tx)
+(swaps.swap-test-case 1.0 1000.0 1000.0 0.996006981039)
+(begin-tx)
+(expect-failure "swap test 7" "K"
+ (swaps.swap-test-case 1.0 1000.0 1000.0 0.996006981040))
+
+(begin-tx)
+(swaps.optimistic-test-case 0.997 5.0 10.0 1.0)
+(begin-tx)
+(expect-failure "optimistic test 1" "K"
+ (swaps.optimistic-test-case 0.997000000001 5.0 10.0 1.0))
+
+(begin-tx)
+(swaps.optimistic-test-case 0.997 10.0 5.0 1.0)
+(begin-tx)
+(expect-failure "optimistic test 2" "K"
+ (swaps.optimistic-test-case 0.997000000001 10.0 5.0 1.0))
+
+(begin-tx)
+(swaps.optimistic-test-case 0.997 5.0 5.0 1.0)
+(begin-tx)
+(expect-failure "optimistic test 2" "K"
+ (swaps.optimistic-test-case 0.997000000001 5.0 5.0 1.0))
+
+(begin-tx)
+(swaps.optimistic-test-case 1.0 5.0 5.0 1.003009027082)
+;; TODO floor instead of round? old val 1.003009027081
+(begin-tx)
+(expect-failure "optimistic test 2" "K"
+ (swaps.optimistic-test-case 1.000000000001 5.0 5.0 1.003009027082))
